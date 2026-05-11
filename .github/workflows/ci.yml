@@ -13,6 +13,8 @@ on:
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REPOSITORY: "gitops-demo"
+  # Opt-in to Node.js 24 to suppress deprecation warnings in 2026
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   build-scan-push:
