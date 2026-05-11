@@ -1,3 +1,5 @@
 Flask==3.0.2
 prometheus-client==0.20.0
-gunicorn==21.2.0
+gunicorn==22.0.0
+wheel>=0.46.2
+setuptools>=79.0.2
