@@ -1,0 +1,114 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    # FinOps/Compute Efficiency: Path filters prevent the CI pipeline from running unnecessarily. 
+    # If a developer only updates a README or a Kubernetes manifest, we don't want to waste 
+    # GitHub Action compute minutes rebuilding the entire Docker image.
+    paths:
+      - 'app/**'
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: "gitops-demo"
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set_tag.outputs.tag }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        # SecOps: Never hardcode credentials. We inject them dynamically via GitHub Secrets.
+        # The IAM user tied to these keys operates on a strict "Least Privilege" policy,
+        # meaning it can ONLY push and pull from our specific ECR repository, nowhere else.
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set Image Tag
+        id: set_tag
+        # Reliability/GitOps: We use the Git commit SHA as the image tag, not "latest".
+        # SHA tags are immutable. "latest" is a moving target. If a deployment breaks, 
+        # rolling back to "latest" is impossible because it constantly gets overwritten. 
+        # Using the SHA guarantees you know exactly what code is running in production.
+        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+      - name: Build and tag Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.set_tag.outputs.tag }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./app
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set_tag.outputs.tag }}'
+          format: 'table'
+          # SecOps "Shift-Left": The pipeline FAILS immediately (exit-code: 1) if a critical CVE is found.
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+          # Business Context: We scan BEFORE the push step. This ensures a vulnerable image 
+          # never enters our container registry. The registry acts as our clean source of truth.
+
+      - name: Push image to Amazon ECR
+        # This step only executes if the Trivy scanner passes with no critical vulnerabilities.
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.set_tag.outputs.tag }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          echo "Successfully pushed $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
+
+  update-k8s-manifest:
+    # This job connects CI (building the image) to CD (deploying the image via GitOps).
+    needs: build-scan-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Grants the pipeline permission to push commits back to our repository.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Kubernetes deployment with new image tag
+        env:
+          IMAGE_TAG: ${{ needs.build-scan-push.outputs.image_tag }}
+          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+        run: |
+          # Use sed to find the image string in our deployment manifest and replace the tag
+          # with the newly built and scanned immutable Git SHA.
+          sed -i "s|image: .*gitops-demo.*|image: ${ECR_REGISTRY}/gitops-demo:${IMAGE_TAG}|g" k8s/deployment.yaml
+
+      - name: Commit and push changes
+        env:
+          IMAGE_TAG: ${{ needs.build-scan-push.outputs.image_tag }}
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add k8s/deployment.yaml
+          
+          # GitOps Safety: Adding [skip ci] to the commit message is critical. 
+          # If we push a commit to the 'main' branch, GitHub Actions wants to trigger another build.
+          # [skip ci] prevents an infinite loop of the pipeline triggering itself.
+          git commit -m "ci: update image tag to $IMAGE_TAG [skip ci]"
+          git push
