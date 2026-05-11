@@ -1,0 +1,19 @@
+# kind is "Kubernetes in Docker". It runs local Kubernetes clusters using Docker containers as "nodes".
+# We use this instead of a real EKS cluster during development to validate our deployment logic, 
+# networking, and manifests locally for $0. It prevents wasting $73/month on an AWS EKS control 
+# plane and reduces the feedback loop from 15 minutes (cloud provisioning) to 30 seconds.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+    # Maps localhost:8080 on your Mac/Ubuntu to port 30000 on the worker node.
+    # Note: To utilize this direct mapping without a port-forward, the Kubernetes Service 
+    # must be type NodePort (exposing port 30000) or use an Ingress controller. 
+    # Since we are using a ClusterIP service below for internal security, we will still 
+    # rely on the port-forward command to access it.
+    extraPortMappings:
+      - containerPort: 30000
+        hostPort: 8081
+        protocol: TCP

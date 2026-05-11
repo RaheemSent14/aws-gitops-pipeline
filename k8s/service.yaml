@@ -1,0 +1,19 @@
+# Why ClusterIP and not LoadBalancer?
+# A LoadBalancer service type instructs the cloud provider (AWS) to provision an external 
+# Classic or Network Load Balancer, which incurs hourly costs. In a local `kind` cluster, 
+# there is no AWS API to talk to, so a LoadBalancer service will remain in a "Pending" state 
+# forever. ClusterIP keeps traffic internal to the cluster, which is standard for microservices 
+# not directly exposed to the public internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-service
+  namespace: gitops-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: flask-app
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5000

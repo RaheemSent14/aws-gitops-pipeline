@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flask-app
+  namespace: gitops-demo
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: flask-app
+  template:
+    metadata:
+      labels:
+        app: flask-app
+    spec:
+      containers:
+      - name: flask-app
+        # Placeholder image. ArgoCD will patch this dynamically in the future.
+        image: raheemsent14/gitops-demo:latest
+        
+        # imagePullPolicy: IfNotPresent tells Kubernetes to check its local cache first.
+        # Development Context: This allows our 'kind' cluster to use the image we manually 
+        # loaded without attempting to reach out to Docker Hub or ECR. 
+        # Production Context: This will be reverted to 'Always' once we migrate to AWS 
+        # to ensure ArgoCD forces the cluster to pull the latest verified registry hash.
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - containerPort: 5000
+        
+        # Resource limits prevent a single container from causing node exhaustion.
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "250m"
+            memory: "256Mi"
+            
+        envFrom:
+        - configMapRef:
+            name: gitops-demo-config
+            
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 10

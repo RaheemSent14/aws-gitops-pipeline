@@ -1,0 +1,27 @@
+# Local environments
+.env
+__pycache__/
+*.pyc
+
+# macOS specific
+# Cleanliness: Prevents Apple's custom folder metadata from polluting the shared codebase.
+.DS_Store
+
+# Keys and secrets
+# SecOps: Prevents accidental commits of private keys or Kubernetes cluster credentials.
+*.pem
+*.key
+kubeconfig
+
+# Terraform
+# FinOps/SecOps: Ignores local state files which can contain plaintext secrets and infrastructure metadata.
+.terraform/
+*.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+*.tfplan
+
+# Note on .terraform.lock.hcl: 
+# This file IS NOT ignored. It must be committed. 
+# Reliability: It locks the exact versions of the Terraform provider plugins (like hashicorp/aws) 
+# to ensure the CI server and every developer use identical binaries, preventing "it works on my machine" bugs.
