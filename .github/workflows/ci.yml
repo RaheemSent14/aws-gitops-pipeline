@@ -13,7 +13,8 @@ on:
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   ECR_REPOSITORY: "gitops-demo"
-  # Opt-in to Node.js 24 to suppress deprecation warnings in 2026
+  # Reliability: Opt-in to Node.js 24 to suppress deprecation warnings and future-proof the runner
+  # before the Node.js 20 removal timeline in late 2026.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
@@ -57,12 +58,15 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./app
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        # SecOps "Shift-Left": Pinned to safe v-prefixed release following the March 2026 compromise.
+        # This step scans the container image for known OS and application package vulnerabilities.
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: '${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.set_tag.outputs.tag }}'
           format: 'table'
-          # SecOps "Shift-Left": The pipeline FAILS immediately (exit-code: 1) if a critical CVE is found.
+          # Fail the build (exit-code 1) if High/Critical issues are found.
           exit-code: '1'
+          # Ignore vulnerabilities that vendors haven't released a patch for yet to prevent pipeline noise.
           ignore-unfixed: true
           vuln-type: 'os,library'
           severity: 'CRITICAL,HIGH'
