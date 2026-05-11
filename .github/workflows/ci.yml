@@ -99,7 +99,9 @@ jobs:
       - name: Update Kubernetes deployment with new image tag
         env:
           IMAGE_TAG: ${{ needs.build-scan-push.outputs.image_tag }}
-          ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+          # Cleanliness: AWS Account ID has been moved from Secrets to GitHub Variables (vars).
+          # This follows standard AWS auditing practices as account numbers are configuration details, not cryptographic keys.
+          ECR_REGISTRY: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
         run: |
           # Use sed to find the image string in our deployment manifest and replace the tag
           # with the newly built and scanned immutable Git SHA.
