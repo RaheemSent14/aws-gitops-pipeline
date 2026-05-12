@@ -13,6 +13,12 @@ spec:
       labels:
         app: flask-app
     spec:
+      # SecOps / Registry Authentication: This block attaches the cryptographically generated 
+      # ECR credential token to the pod's execution context. Because Amazon ECR repositories 
+      # are private by default to protect proprietary application binaries, the hosting node's 
+      # kubelet agent cannot read or download the image layers without this explicit authentication bridge.
+      imagePullSecrets:
+        - name: ecr-credentials
       containers:
       - name: flask-app
         # Placeholder image. ArgoCD will patch this dynamically in the future.
