@@ -25,7 +25,7 @@ APP_INFO = Gauge(
     ['version']
 )
 
-APP_VERSION = os.environ.get('APP_VERSION', '1.0.0')
+APP_VERSION = os.environ.get('APP_VERSION', '2.0.0')
 APP_INFO.labels(version=APP_VERSION).set(1)
 
 @app.before_request
