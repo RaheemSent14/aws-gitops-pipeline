@@ -16,7 +16,7 @@ spec:
       containers:
       - name: flask-app
         # Placeholder image. ArgoCD will patch this dynamically in the future.
-        image: 428613119854.dkr.ecr.us-east-1.amazonaws.com/gitops-demo:7b4e332344e5a7d29fe8e20dfd503f51f7b1ea93
+        image: 428613119854.dkr.ecr.us-east-1.amazonaws.com/gitops-demo:8d964a6f29be460945a3d514fe80268b46ce8b09
         
         # imagePullPolicy: IfNotPresent tells Kubernetes to check its local cache first.
         # Development Context: This allows our 'kind' cluster to use the image we manually 
