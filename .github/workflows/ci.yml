@@ -43,7 +43,7 @@ jobs:
 
       - name: Set Image Tag
         id: set_tag
-        # Reliability/GitOps: We use the Git commit SHA as the image tag, not "latest".
+        # Reliability/GitOps: We use the Git commit SHA as the image tag.
         # SHA tags are immutable. "latest" is a moving target. If a deployment breaks, 
         # rolling back to "latest" is impossible because it constantly gets overwritten. 
         # Using the SHA guarantees you know exactly what code is running in production.
@@ -54,8 +54,9 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.set_tag.outputs.tag }}
         run: |
+          # Architecture Note: We build and tag EXCLUSIVELY with the unique Git SHA.
+          # We removed the ':latest' tag build to comply with our ECR IMMUTABLE policy constraint.
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./app
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest ./app
 
       - name: Run Trivy vulnerability scanner
         # SecOps "Shift-Left": Pinned to safe v-prefixed release following the March 2026 compromise.
@@ -79,8 +80,8 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ steps.set_tag.outputs.tag }}
         run: |
+          # SecOps Compliance: Pushing exclusively via the unique, immutable Git SHA.
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
           echo "Successfully pushed $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_STEP_SUMMARY
 
   update-k8s-manifest:
