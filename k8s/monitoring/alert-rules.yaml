@@ -1,0 +1,30 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flask-app-alerts
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: flask-app-safety.rules
+    rules:
+    - alert: PodRestartingTooOften
+      # PromQL: Evaluates the rate of container restarts over a rolling 5-minute window
+      expr: increase(kube_pod_container_status_restarts_total{namespace="gitops-demo"}[5m]) > 3
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Application container restart anomalies detected on pod {{ $labels.pod }}"
+        description: "Pod has executed more than 3 restarts within a 5-minute window, indicating runtime instability."
+
+    - alert: HighMemoryUsage
+      # PromQL: Compares active working set usage bytes against configured container specification resource limits
+      expr: (sum(container_memory_working_set_bytes{namespace="gitops-demo", container="flask-app"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace="gitops-demo", container="flask-app"}) by (pod)) * 100 > 80
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Memory threshold breach detected on pod {{ $labels.pod }}"
+        description: "Container memory allocation is currently exceeding 80% of its resource limit parameters."

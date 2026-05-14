@@ -1,0 +1,29 @@
+# k8s/argocd/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitops-demo
+  # The ArgoCD controller looks exclusively inside its management namespace for configuration resources
+  namespace: argocd
+spec:
+  # Groups resources within logical bounds; default is standard for single cluster operations
+  project: default
+  source:
+    # Target repository holding desired state declarations
+    repoURL: https://github.com/RaheemSent14/aws-gitops-pipeline
+    targetRevision: main
+    # Performance Optimization: Limits the scanning engine to evaluate the 'k8s' directory only
+    path: k8s
+  destination:
+    # Points to the local API endpoint of the hosting cluster
+    server: https://kubernetes.default.svc
+    namespace: gitops-demo
+  syncPolicy:
+    automated:
+      # Prune guarantees resources deleted from Git are uninstalled from the cluster automatically
+      prune: true
+      # SelfHeal overrides manual outside interventions to match the Git declaration baseline
+      selfHeal: true
+    syncOptions:
+      # Ensures target constraints exist before rendering components
+      - CreateNamespace=true

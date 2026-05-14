@@ -1,0 +1,22 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flask-app-monitor
+  # The Prometheus controller searches every namespace for objects with this specific tracking label
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  # Instructs the collection engine to search outside its own namespace limits
+  namespaceSelector:
+    matchNames:
+      - gitops-demo
+  # Targets the application service layer based on matching metadata labels
+  selector:
+    matchLabels:
+      app: flask-app
+  endpoints:
+    # Points to the specific named port string defined inside your k8s/service.yaml manifest
+    - port: http
+      path: /metrics
+      interval: 15s
