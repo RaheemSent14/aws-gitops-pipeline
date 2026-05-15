@@ -26,7 +26,7 @@ spec:
         # DETERMINISTIC BUILDS: We use a unique Git SHA as the image tag. 
         # This guarantees that the code running in the cluster is identical 
         # to the code we reviewed in our last pull request.
-        image: 428613119854.dkr.ecr.us-east-1.amazonaws.com/gitops-demo:18145584e1d3596273ddfdc9125482c2bc4661d1
+        image: 428613119854.dkr.ecr.us-east-1.amazonaws.com/gitops-demo:9a082118484eb809be85a995d44b3e3283d396f3
         
         # RESOURCE QUOTAS (FINOPS): 
         # Requests: The 'minimum' reserved compute for this app (guarantees performance).
