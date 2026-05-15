@@ -10,34 +10,36 @@ app = Flask(__name__)
 # PROMETHEUS TELEMETRY DEFINITIONS
 # ==========================================
 
-# Counter metric: Tracks cumulative request volume dimensions.
-# Intent: Measures incoming traffic trends and error rates over time.
-# Label Choice: 'http_status' separates 200s from 400/500 errors to calculate error rates.
+# Counter: Tracks "The Past". 
+# Production Context: We label by 'http_status' so we can calculate our 
+# Error Rate percentage (e.g., (5xx errors / total requests) * 100).
 REQUEST_COUNT = Counter(
     'http_requests_total',
     'Total HTTP requests processed by the application',
     ['method', 'endpoint', 'http_status']
 )
 
-# Histogram metric: Tracks performance response duration distributions.
-# Intent: Measures system latency. Prometheus automatically creates bucket ranges 
-# allowing us to calculate P95 or P99 response trends in Grafana.
+# Histogram: Tracks "The User Experience".
+# Production Context: Unlike a simple average, a histogram allows us to calculate 
+# P95 latency in Grafana. This reveals if 5% of our users are experiencing 
+# massive delays, even if the "average" response time looks healthy.
 REQUEST_LATENCY = Histogram(
     'http_request_duration_seconds',
     'HTTP request latency processing duration in seconds',
     ['endpoint']
 )
 
-# Gauge metric: Tracks a point-in-time value that can rise or fall.
-# Intent: Used here to pass static metadata (the application version) into our time-series data.
-# How it works: It outputs a constant value of 1, but the 'version' label tells Grafana exactly what code is running.
+# Gauge: Tracks "The Metadata".
+# Production Context: This provides a visual "timeline marker" in Grafana. 
+# When we deploy a new version via ArgoCD, this value changes, allowing us 
+# to immediately see if a performance dip correlates with a specific code release.
 APP_INFO = Gauge(
     'app_info',
     'Application metadata properties tracking the current version',
     ['version']
 )
 
-# Pull version from environment variables (fallback to 2.0.0) and initialize the gauge on boot
+# APP_VERSION is injected dynamically via AWS Secrets Manager & External Secrets Operator.
 APP_VERSION = os.environ.get('APP_VERSION', '2.0.0')
 APP_INFO.labels(version=APP_VERSION).set(1)
 
@@ -48,9 +50,9 @@ APP_INFO.labels(version=APP_VERSION).set(1)
 @app.before_request
 def before_request():
     """
-    Executes right before a request hits the routing logic.
-    We attach a start timestamp and a unique tracing ID directly to the request object.
-    This lets us accurately measure performance latency later in the lifecycle.
+    Executes before routing logic. We initialize tracing and timing here.
+    Production Context: Attaching a unique ID to every request allows us 
+    to track a single user transaction across different microservices (Distributed Tracing).
     """
     request.start_time = time.time()
     request.id = str(uuid.uuid4())
@@ -58,19 +60,18 @@ def before_request():
 @app.after_request
 def after_request(response):
     """
-    Executes right before the response is sent back to the client.
-    Handles metrics tracking and injects telemetry headers globally.
+    Executes before the response is sent. This is our telemetry 'collection point'.
     """
-    # EDGE CASE PASSTHROUGH: If the request is Prometheus scraping our /metrics page, 
-    # we exit early. Otherwise, Prometheus would count its own scrapes as regular traffic, 
-    # polluting our real user analytics.
+    # DATA PURITY: We explicitly ignore the /metrics endpoint. 
+    # In a production setting, Prometheus scrapes this app every 15 seconds. 
+    # If we don't filter this, 90% of our 'traffic' data would be the scraper 
+    # itself, making our real user analytics useless.
     if request.path == '/metrics':
         return response
 
-    # Calculate exact duration execution speed
     request_latency = time.time() - request.start_time
     
-    # Record metrics into memory registers with precise dimensions
+    # Record metrics into in-memory registers
     REQUEST_COUNT.labels(
         method=request.method,
         endpoint=request.path,
@@ -79,8 +80,9 @@ def after_request(response):
     
     REQUEST_LATENCY.labels(endpoint=request.path).observe(request_latency)
     
-    # DISTRIBUTED TRACING BOUNDARY: Inject the request ID into the outbound headers.
-    # This lets us map front-end browser logs to specific backend transactions when debugging.
+    # TRACING: Return the Request ID in the headers. 
+    # If a user reports an error, they can provide this ID, and we can 
+    # find the exact logs for their specific failed request.
     response.headers['X-Request-Id'] = request.id
     return response
 
@@ -90,33 +92,29 @@ def after_request(response):
 
 @app.route('/')
 def root():
-    """
-    Primary API application entrypoint returning basic environmental metadata.
-    """
     return jsonify({
         "status": "ok",
         "version": APP_VERSION,
-        "environment": os.environ.get('ENVIRONMENT', 'development')
+        "environment": os.environ.get('ENVIRONMENT', 'production')
     })
 
 @app.route('/health')
 def health():
     """
-    Health check endpoint monitored by Kubernetes liveness and readiness probes.
-    Returns an explicit HTTP 200 status code to confirm the engine is responsive.
+    Health check for Kubernetes Liveness/Readiness probes.
+    Production Context: If this returns anything other than 200, K8s will 
+    automatically stop sending traffic to this pod or restart it (Self-Healing).
     """
     return jsonify({"healthy": True, "checks": {"app": "ok"}}), 200
 
 @app.route('/metrics')
 def metrics():
     """
-    The metric extraction page scraped by the Prometheus controller.
-    Exposes all internal time-series registries as a raw formatted plaintext stream.
+    The scrape point for Prometheus.
     """
     return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
 
 if __name__ == '__main__':
-    # PORT BINDING NOTE: Binding to 0.0.0.0 is mandatory for containerized workloads.
-    # It instructs the application to accept traffic from all available network interfaces 
-    # inside the container, allowing Kubernetes service routers to forward inbound traffic.
+    # Binding to 0.0.0.0 is mandatory for Docker/Kubernetes to allow 
+    # external traffic to reach the application inside the container.
     app.run(host='0.0.0.0', port=5000)

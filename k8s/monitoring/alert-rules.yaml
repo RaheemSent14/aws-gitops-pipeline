@@ -1,8 +1,16 @@
+# alert-rules.yaml
+# Intent: Defines the automated "Guardrails" for the application lifecycle.
+# Production Setting: We use PrometheusRules to codify our Service Level Objectives (SLOs). 
+# Instead of manually checking Grafana, we instruct the cluster to notify us the 
+# moment performance or stability deviates from the expected baseline.
+
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: flask-app-alerts
   namespace: monitoring
+  # OPERATOR BINDING: This label ensures the Prometheus instance managed by 
+  # our Helm chart automatically loads and evaluates these specific rules.
   labels:
     release: kube-prometheus-stack
 spec:
@@ -10,21 +18,30 @@ spec:
   - name: flask-app-safety.rules
     rules:
     - alert: PodRestartingTooOften
-      # PromQL: Evaluates the rate of container restarts over a rolling 5-minute window
+      # STABILITY CHECK: We measure the 'increase' in restart counts over 5 minutes.
+      # Production Setting: A single restart might be a fluke, but more than 3 
+      # indicates a "CrashLoopBackOff" state. We wait for 1 minute (for: 1m) 
+      # before firing the alert to filter out temporary transient blips.
       expr: increase(kube_pod_container_status_restarts_total{namespace="gitops-demo"}[5m]) > 3
       for: 1m
       labels:
         severity: critical
       annotations:
-        summary: "Application container restart anomalies detected on pod {{ $labels.pod }}"
-        description: "Pod has executed more than 3 restarts within a 5-minute window, indicating runtime instability."
+        summary: "High restart rate detected on pod {{ $labels.pod }}"
+        description: "The application is caught in a crash loop. This usually indicates 
+                      a misconfiguration or a breaking change in the latest code release."
 
     - alert: HighMemoryUsage
-      # PromQL: Compares active working set usage bytes against configured container specification resource limits
+      # SATURATION RATIO: We calculate the percentage of memory used vs. the hard limit.
+      # Production Setting: By dividing 'usage' by 'limit' and multiplying by 100, 
+      # we create a relative alert. This is superior to hardcoding "100MB" because 
+      # it stays accurate even if we change the pod's resources later.
       expr: (sum(container_memory_working_set_bytes{namespace="gitops-demo", container="flask-app"}) by (pod) / sum(container_spec_memory_limit_bytes{namespace="gitops-demo", container="flask-app"}) by (pod)) * 100 > 80
       for: 2m
       labels:
         severity: warning
       annotations:
-        summary: "Memory threshold breach detected on pod {{ $labels.pod }}"
-        description: "Container memory allocation is currently exceeding 80% of its resource limit parameters."
+        summary: "Memory saturation reaching critical threshold on {{ $labels.pod }}"
+        description: "Container memory is above 80%. If this reaches 100%, the 
+                      Linux kernel will OOM-Kill (Out of Memory) the process, 
+                      causing an immediate service interruption."

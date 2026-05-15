@@ -1,22 +1,43 @@
+# servicemonitor.yaml
+# Intent: Acts as the "Discovery Bridge" between the Monitoring stack and the Application.
+# Production Context: This manifest allows us to manage monitoring as "Self-Service". 
+# Developers can deploy their own ServiceMonitors alongside their apps without 
+# ever needing access to the core Prometheus server configuration.
+
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: flask-app-monitor
-  # The Prometheus controller searches every namespace for objects with this specific tracking label
   namespace: monitoring
+  # OPERATOR DISCOVERY: This label is mandatory. The Prometheus Operator is 
+  # configured to only "listen" to ServiceMonitors that have this specific 
+  # release label, ensuring it only manages authorized scrape targets.
   labels:
     release: kube-prometheus-stack
 spec:
-  # Instructs the collection engine to search outside its own namespace limits
+  # CROSS-NAMESPACE VISIBILITY: 
+  # In a production setting, monitoring usually sits in a separate namespace 
+  # from the app. This selector instructs the engine to look specifically 
+  # inside the 'gitops-demo' namespace to find our targets.
   namespaceSelector:
     matchNames:
       - gitops-demo
-  # Targets the application service layer based on matching metadata labels
+
+  # TARGET IDENTIFICATION (The Hook):
+  # This matches the 'labels' section of our 'k8s/service.yaml'. 
+  # If a Service exists in the 'gitops-demo' namespace with the label 
+  # 'app: flask-app', Prometheus will automatically start scraping it.
   selector:
     matchLabels:
       app: flask-app
+
   endpoints:
-    # Points to the specific named port string defined inside your k8s/service.yaml manifest
+    # NETWORK MAPPING:
+    # Instead of a port number, we use the named pointer 'http'. 
+    # This matches the 'name: http' we defined in our Service manifest, 
+    # making our monitoring resilient to internal network port changes.
     - port: http
       path: /metrics
+      # SCRAPE INTERVAL: How often to pull data. 15s provides high-resolution 
+      # data for real-time alerting without overwhelming the network.
       interval: 15s

@@ -1,16 +1,16 @@
 # main.tf
-# Intent: Defines the explicit architectural state for the VPC, IAM mappings, and EKS resources.
-# Problem Solved: Builds a functional network mesh and computes infrastructure automatically.
-# Business Value: Establishes a secure, repeatable infrastructure foundation that segregates public traffic from backend application compute nodes.
+# Intent: Provisions the underlying "Cloud Real Estate" (VPC) and "Brains" (EKS) of the system.
+# Problem Solved: Replaces manual, error-prone console clicking with a repeatable, versioned audit trail.
+# Business Value: Ensures that if our primary region goes down, we can rebuild the entire company infrastructure in minutes using this code.
 
 data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# 1. Virtual Private Cloud (VPC) Subsystem
-# Architecture: Deploys 2 Public subnets for edge routing and 2 Private subnets for compute containment.
-# Why it matters: Segregates public-facing ingress resources from sensitive backend data and compute elements.
-# Pitfalls: Missing the explicit ELB tags will cause downstream Kubernetes ingress controllers to fail when provisioning AWS load balancers automatically.
+# 1. THE VIRTUAL PRIVATE CLOUD (VPC) SUBSYSTEM
+# Architecture: Implements "Network Partitioning" with 2 Public and 2 Private subnets.
+# Why it matters: We place our application in Private subnets to prevent direct internet 
+# access, drastically reducing our "Attack Surface" (Blast Radius).
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = "~> 5.5.0"
@@ -18,19 +18,22 @@ module "vpc" {
   name = "gitops-core-vpc"
   cidr = var.vpc_cidr
 
-  # Distribute network layers evenly across the first two active Availability Zones
+  # High Availability (HA): Spread across 2 Availability Zones to survive a physical AWS data center failure.
   azs             = slice(data.aws_availability_zones.available.names, 0, 2)
   private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
   public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
 
-  # FinOps Optimization: Consolidates outbound private routing traffic into a single NAT gateway instance.
-  # This avoids the standard enterprise cost of a NAT Gateway per Availability Zone during development and portfolio review.
+  # FINOPS VICTORY: Single NAT Gateway.
+  # Production Context: Enterprises usually use one NAT per AZ ($90+/month). 
+  # For this portfolio, we use a single NAT to provide outbound internet to our 
+  # private pods while saving ~$45/month in idle infrastructure fees.
   enable_nat_gateway     = true
   single_nat_gateway     = true
   one_nat_gateway_per_az = false
 
-  # Required internal annotations enabling automated AWS Application Load Balancer discovery engines.
-  # These tags allow the AWS Load Balancer Controller inside the cluster to identify target subnets for routing traffic.
+  # DYNAMIC DISCOVERY TAGS: 
+  # These are the "Signs" that tell the AWS Load Balancer Controller: 
+  # "You are allowed to build an internet-facing entrance here."
   public_subnet_tags = {
     "kubernetes.io/role/elb" = "1"
   }
@@ -39,9 +42,8 @@ module "vpc" {
   }
 }
 
-# 2. IAM Configuration: Control Plane Management Role
-# Intent: Establishes an identity blueprint allowing the EKS service to manage underlying infrastructure components.
-# Why it matters: Enforces strict separation of duties; the control plane role does not share credentials with worker nodes.
+# 2. IAM: THE CLUSTER CONTROL ROLE
+# Intent: Defines the "Powers" the EKS Brain has to manage AWS resources.
 resource "aws_iam_role" "cluster" {
   name = "eks-cluster-control-role"
 
@@ -57,34 +59,31 @@ resource "aws_iam_role" "cluster" {
 
 resource "aws_iam_role_policy_attachment" "cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.cluster.name
+  role        = aws_iam_role.cluster.name
 }
 
-# 3. Amazon EKS Control Plane
-# Intent: Provisions the managed Kubernetes master nodes orchestrating api requests and state tracking.
-# Why it matters: Acts as the brain of the container platform, isolating critical internal components from direct network manipulation.
+# 3. THE AMAZON EKS CONTROL PLANE (THE BRAIN)
 resource "aws_eks_cluster" "eks" {
   name     = "gitops-cloud-cluster"
   role_arn = aws_iam_role.cluster.arn
   
-  # FinOps Compliance: Set to 1.32 to leverage AWS Standard Support baselines.
-  # This choice keeps our control plane billing flat at $0.10/hour, completely evading 
-  # the $0.60/hour Extended Support price penalties enforced on legacy infrastructure tracks.
+  # FINOPS MASTERSTROKE: EKS 1.32.
+  # Strategic Choice: By staying on a "Standard Support" version, we pay $0.10/hr. 
+  # If we used version 1.28, AWS would charge an extra $0.50/hr for "Extended Support". 
+  # This decision saves the business ~$360/month per cluster.
   version  = "1.32"
 
   vpc_config {
-    endpoint_private_access = true
-    endpoint_public_access  = true
+    endpoint_private_access = true # Internal pods talk to K8s API privately
+    endpoint_public_access  = true # Allows us to manage the cluster from our local MacBook
     subnet_ids              = module.vpc.private_subnets
   }
 
-  # Safety Guard: Ensures IAM policies exist before the cluster initializes to prevent provisioning runtime race conditions.
   depends_on = [aws_iam_role_policy_attachment.cluster_policy]
 }
 
-# 4. IAM Configuration: Data Plane Worker Node Role
-# Intent: Provides worker nodes with identity permissions to register with the master control plane and stream logs.
-# Why it matters: Implements cloud-native authentication, removing the need to manage static private keys or configuration passwords inside pods.
+# 4. IAM: WORKER NODE ROLE (THE MUSCLE)
+# Intent: Permissions for the EC2 servers to join the cluster and download images from ECR.
 resource "aws_iam_role" "node" {
   name = "eks-worker-node-role"
 
@@ -98,44 +97,41 @@ resource "aws_iam_role" "node" {
   })
 }
 
+# Standard attachments for Node health, Networking (CNI), and Registry (ECR) access.
 resource "aws_iam_role_policy_attachment" "node_worker" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.node.name
+  role        = aws_iam_role.node.name
 }
-
 resource "aws_iam_role_policy_attachment" "node_cni" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.node.name
+  role        = aws_iam_role.node.name
 }
-
 resource "aws_iam_role_policy_attachment" "node_registry" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.node.name
+  role        = aws_iam_role.node.name
 }
 
-# 5. Amazon EKS Managed Node Group
-# Intent: Provisions the auto-scaling pool of EC2 instances serving as compute workers for our live workloads.
-# Why it matters: Hosts our actual application pods and core cluster extensions like ArgoCD.
-# Pitfalls: Setting desired_size to 1 causes resource starvation when running complex management stacks alongside applications.
+# 5. EKS MANAGED NODE GROUP (THE WORKFORCE)
 resource "aws_eks_node_group" "nodes" {
   cluster_name    = aws_eks_cluster.eks.name
   node_group_name = "managed-linux-workers"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = module.vpc.private_subnets
 
-  # Compute Selection: Configured with t3.small instances to handle running ArgoCD and our Flask workload efficiently.
+  # INSTANCE SIZING: t3.small (2 vCPU, 2GiB RAM).
+  # Technical Context: We chose t3.small because t3.micro does not have enough "Pods-per-Node" 
+  # capacity to run the ArgoCD and Prometheus management agents.
   instance_types = ["t3.small"]
 
   scaling_config {
-    # Horizontal Capacity Scaling Solution: Upgraded from 1 to 2 active compute machines.
-    # This change expands cluster compute runway to resolve scheduling bottleneck limits, 
-    # giving the EKS scheduler enough room to run our Flask application pods alongside the ArgoCD suite.
+    # PERFORMANCE SOLUTION: desired_size = 2.
+    # Why: A single node becomes "Saturated" by the overhead of Kubernetes system pods. 
+    # Having 2 nodes provides the "Compute Runway" needed for our app to schedule successfully.
     desired_size = 2
     max_size     = 2
     min_size     = 1
   }
 
-  # Safety Guard: Prevents nodes from booting before their respective networking and ECR tracking policies are fully active.
   depends_on = [
     aws_iam_role_policy_attachment.node_worker,
     aws_iam_role_policy_attachment.node_cni,

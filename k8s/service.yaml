@@ -3,24 +3,28 @@ kind: Service
 metadata:
   name: flask-service
   namespace: gitops-demo
-  # DISCOVERY LAYER: We attach this metadata label to give the Service a clear identity card.
-  # The Prometheus operator continuously scans the cluster for Services matching this exact key-value pair, 
-  # allowing it to dynamically build its scraping inventory without manual configuration updates.
+  # DISCOVERY MECHANISM: In a production setting, we use this label to bridge 
+  # the gap between the application and the monitoring stack. Our ServiceMonitor 
+  # is configured to "discover" any service with this specific label, allowing 
+  # for zero-touch configuration as we scale.
   labels:
     app: flask-app
 spec:
-  # Why ClusterIP and not LoadBalancer?
-  # A LoadBalancer service type instructs a public cloud provider to provision an external hardware balancer, 
-  # which generates unnecessary hourly costs. In our local validation environment, ClusterIP keeps the routing 
-  # internal to the cluster network, which perfectly mirrors a secure, cost-optimized backend microservice layer.
+  # FINOPS & SECOPS CHOICE: Why ClusterIP?
+  # 1. Security: Backend services should never be directly exposed to the public internet. 
+  # 2. Cost: A LoadBalancer type triggers a cloud provider's API to provision a 
+  #    dedicated (and expensive) resource. ClusterIP keeps traffic internal to 
+  #    the cluster's private network, which is faster and free.
   type: ClusterIP
   selector:
+    # This links the Service to our Flask pods managed by the Deployment.
     app: flask-app
   ports:
-    # INTENT CLARITY: Naming this port 'http' decouples our networking abstraction from raw port numbers.
-    # If the backend engineering team shifts the application container from port 5000 to port 8080 down the road, 
-    # our monitoring tools won't break because they are pinned to the named pointer 'http' rather than a literal number.
+    # ABSTRACTION LAYER: We name this port 'http'. 
+    # In a production setting, our monitoring tools (Prometheus) point to the 
+    # name 'http' rather than the number '80'. This means we can change our 
+    # network architecture later without breaking our dashboard.
   - name: http
     protocol: TCP
-    port: 80
-    targetPort: 5000
+    port: 80        # The port the Service listens on inside the cluster.
+    targetPort: 5000 # The actual port the Flask app is listening on in the container.

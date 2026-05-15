@@ -4,6 +4,9 @@ metadata:
   name: flask-app
   namespace: gitops-demo
 spec:
+  # HIGH AVAILABILITY: In a production setting, we run at least 2 replicas. 
+  # This ensures that during a node failure or a rolling update, the application 
+  # remains online with zero downtime for the end user.
   replicas: 2
   selector:
     matchLabels:
@@ -13,28 +16,22 @@ spec:
       labels:
         app: flask-app
     spec:
-      # SecOps / Registry Authentication: This block attaches the cryptographically generated 
-      # ECR credential token to the pod's execution context. Because Amazon ECR repositories 
-      # are private by default to protect proprietary application binaries, the hosting node's 
-      # kubelet agent cannot read or download the image layers without this explicit authentication bridge.
+      # SECOPS / REGISTRY TRUST: We use imagePullSecrets to authenticate with 
+      # our private Amazon ECR registry. In a production setting, this prevents 
+      # proprietary code from being pulled by unauthorized users or clusters.
       imagePullSecrets:
         - name: ecr-credentials
       containers:
       - name: flask-app
-        # Placeholder image. ArgoCD will patch this dynamically in the future.
+        # DETERMINISTIC BUILDS: We use a unique Git SHA as the image tag. 
+        # This guarantees that the code running in the cluster is identical 
+        # to the code we reviewed in our last pull request.
         image: 428613119854.dkr.ecr.us-east-1.amazonaws.com/gitops-demo:18145584e1d3596273ddfdc9125482c2bc4661d1
         
-        # imagePullPolicy: IfNotPresent tells Kubernetes to check its local cache first.
-        # Development Context: This allows our 'kind' cluster to use the image we manually 
-        # loaded without attempting to reach out to Docker Hub or ECR. 
-        # Production Context: This will be reverted to 'Always' once we migrate to AWS 
-        # to ensure ArgoCD forces the cluster to pull the latest verified registry hash.
-        imagePullPolicy: IfNotPresent
-        
-        ports:
-        - containerPort: 5000
-        
-        # Resource limits prevent a single container from causing node exhaustion.
+        # RESOURCE QUOTAS (FINOPS): 
+        # Requests: The 'minimum' reserved compute for this app (guarantees performance).
+        # Limits: The 'maximum' it can consume (prevents a bug from crashing the whole cluster).
+        # This prevents the "Noisy Neighbor" problem where one app steals all node memory.
         resources:
           requests:
             cpu: "100m"
@@ -43,17 +40,32 @@ spec:
             cpu: "250m"
             memory: "256Mi"
             
-        envFrom:
-        - configMapRef:
-            name: gitops-demo-config
+        # CENTRALIZED CONFIGURATION: We pull environment variables from a 
+        # K8s Secret created by the External Secrets Operator (ESO). 
+        # In a production setting, this allows us to update the 'Source of Truth' 
+        # in AWS Secrets Manager and have it automatically propagate to the pods.
+        env:
+        - name: APP_VERSION
+          valueFrom:
+            secretKeyRef:
+              name: app-config-secret
+              key: APP_VERSION
+        - name: ENVIRONMENT
+          valueFrom:
+            secretKeyRef:
+              name: app-config-secret
+              key: ENVIRONMENT
             
+        # SELF-HEALING (RELIABILITY):
+        # Liveness: "Am I alive?" If this fails, K8s kills the pod and starts a new one.
+        # Readiness: "Am I ready for work?" If this fails, K8s stops sending user traffic 
+        # to this pod until it recovers (vital during heavy boot-up sequences).
         livenessProbe:
           httpGet:
             path: /health
             port: 5000
           initialDelaySeconds: 10
           periodSeconds: 15
-          
         readinessProbe:
           httpGet:
             path: /health
